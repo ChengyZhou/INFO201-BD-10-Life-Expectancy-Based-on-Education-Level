@@ -1,0 +1,224 @@
+---
+title: "Final Life Expectancy Based on Education Level"
+author: 
+  - "Maha Mustafa"
+  - "Selene Khamneian"
+  - "Chengyue Zhou"
+date: today
+format:
+  dashboard:
+    theme: minty
+    embed-resources: true
+editor:
+  markdown:
+    wrap: sentence
+---
+```{r}
+#| include: false
+#| warning: false
+library(dplyr)
+library(ggplot2)
+library(plotly)
+```
+
+# Part 1
+
+### Topical Overview
+
+Education is widely recognized as an important social determinant of health that can influence long-term well-being and longevity. Higher educational attainment is often associated with higher income, improved access to healthcare, and healthier living conditions, which can contribute to longer life expectancy. According to the World Health Organization, social determinants such as education, income, and environment play a major role in shaping health outcomes and quality of life (https://www.who.int/health-topics/social-determinants-of-health). This project explores how differences in educational attainment across U.S. counties may relate to differences in life expectancy.
+
+Our analysis focuses on three main questions: **(1) Which education level is associated with the highest average life expectancy across U.S. counties? (2) How does the percentage of adults with a bachelor's degree or higher relate to life expectancy? (3) Do counties with a higher percentage of adults who did not complete high school have lower life expectancy?** To answer these questions, we combine two publicly available datasets. The first dataset contains life expectancy estimates from the National Center for Health Statistics, available at https://www.cdc.gov/nchs/data-visualization/life-expectancy/index.html. The second dataset contains county-level educational attainment data from the United States Department of Agriculture Economic Research Service, available at https://www.ers.usda.gov/data-products/county-level-data-sets/.
+
+Examining the relationship between education and life expectancy is important because it can reveal broader social and structural inequalities that affect health outcomes across communities. Identifying these patterns may help policymakers and researchers better understand how access to education relates to public health and community well-being. However, there are also limitations to consider when using these datasets. The life expectancy data was collected between 2010–2015, while the education data represents 2019–2023 estimates, so the time periods do not perfectly align. Additionally, the datasets do not include other factors such as income, race, healthcare access, or environmental conditions, which means the analysis can show correlations but cannot prove causal relationships.
+
+### Data Context
+
+**Dataset 1: Life Expectancy Data**
+
+Dataset Source: National Center for Health Statistics Life Expectancy Data — https://www.cdc.gov/nchs/data-visualization/life-expectancy/index.html
+
+Organization: National Center for Health Statistics, part of the Centers for Disease Control and Prevention.
+
+This dataset contains estimates of life expectancy at birth for census tracts across the United States. Life expectancy represents the average number of years a person is expected to live based on current mortality patterns. The data was produced by the National Center for Health Statistics using mortality records and population estimates. These estimates help researchers understand geographic patterns in longevity and identify communities with significant health disparities.
+
+The dataset includes measurements for more than 73,000 census tracts across the United States. Each observation records the state, county, census tract number, estimated life expectancy, and associated statistical information such as standard errors. The data was collected using national mortality records and population data between 2010 and 2015, providing a detailed view of health outcomes at a small geographic level.
+
+The geographic scope includes the entire United States, making it possible to analyze regional health differences across counties and states. A major strength of this dataset is its large sample size and nationwide coverage, which allows for comparisons between communities across the country. However, some census tracts contain missing life expectancy estimates, which may reduce representation in smaller or rural areas.
+
+**Dataset 2: Educational Attainment Data**
+
+Dataset Source: County-Level Educational Attainment Data — https://www.ers.usda.gov/data-products/county-level-data-sets/
+
+Organization: Published by the United States Department of Agriculture Economic Research Service using data collected by the United States Census Bureau.
+
+This dataset provides statistics about educational attainment among adults across U.S. counties. Educational attainment refers to the highest level of education completed by individuals, such as less than a high school diploma, high school graduate, some college or associate degree, or bachelor's degree and above. These measures are widely used to study socioeconomic conditions and understand how education influences economic and health outcomes.
+
+The dataset contains over 169,000 records representing county-level educational statistics across the United States. Each observation includes the state, county name, the type of education measure being recorded, and the value representing either counts or percentages of adults in each category. For this project, we focus specifically on percentage values from 2019–2023 estimates describing adult educational attainment levels.
+
+The geographic scope covers counties throughout the United States, making it possible to compare educational patterns across different regions. One benefit of this dataset is its detailed breakdown of education levels at the county level. However, a limitation is that it measures educational attainment but does not capture differences in the quality of education or other factors such as income or employment opportunities that may also affect life expectancy.
+
+# Part 2
+
+### Load Data
+```{r}
+life <- read.csv("U.S._Life_Expectancy_at_Birth_by_State_and_Census_Tract_-_2010-2015.csv")
+education <- read.csv("Education2023.csv")
+```
+
+### Clean Life Expectancy Data
+```{r}
+life_remove_blank <- life |>
+  filter(County != "(blank)")
+
+life_remove_blank <- life_remove_blank |>
+  mutate(County = sub(",.*", "", County))
+
+state_name_abv_df <- data.frame(State.Code = state.abb, State.Name = state.name)
+
+combined_df <- left_join(life_remove_blank, state_name_abv_df, join_by(State == State.Name))
+
+select_col_life <- combined_df |>
+  select(State.Code, County, Life.Expectancy)
+
+life_cleaned <- select_col_life |>
+  group_by(State.Code, County) |>
+  summarize(avg.life.expectancy = mean(Life.Expectancy, na.rm = TRUE), .groups = "drop")
+```
+
+### Clean Education Data
+```{r}
+education_remove_summary <- education |>
+  filter(State != "US")
+
+education_remove_col <- education_remove_summary |>
+  select(State, Area.name, Attribute, Value)
+
+education_cleaned <- education_remove_col |>
+  filter(Attribute == "Percent of adults who are not high school graduates, 2019-23" |
+         Attribute == "Percent of adults who are high school graduates (or equivalent), 2019-23" |
+         Attribute == "Percent of adults completing some college or associate degree, 2019-23" |
+         Attribute == "Percent of adults with a bachelor's degree or higher, 2019-23")
+```
+
+### Join the Two Datasets
+```{r}
+joined_df <- left_join(life_cleaned, education_cleaned,
+                       join_by(State.Code == State, County == Area.name))
+```
+
+### Prepare Data for Visualizations
+```{r}
+clean_joined_df <- joined_df |>
+  filter(!is.na(avg.life.expectancy))
+
+clean_joined_df <- clean_joined_df |>
+  mutate(
+    education_level = case_when(
+      Attribute == "Percent of adults who are not high school graduates, 2019-23" ~ "Less than HS",
+      Attribute == "Percent of adults who are high school graduates (or equivalent), 2019-23" ~ "High School",
+      Attribute == "Percent of adults completing some college or associate degree, 2019-23" ~ "Some College",
+      Attribute == "Percent of adults with a bachelor's degree or higher, 2019-23" ~ "Bachelor+"
+    )
+  )
+
+summary_df <- clean_joined_df |>
+  filter(!is.na(education_level)) |>
+  group_by(education_level) |>
+  summarize(
+    mean_life_expectancy = weighted.mean(avg.life.expectancy, Value, na.rm = TRUE)
+  )
+```
+
+### Research Question 1
+
+**Which education level is associated with the highest average life expectancy across U.S. counties?**
+```{r}
+ggplot(summary_df, aes(x = education_level, y = mean_life_expectancy, fill = education_level)) +
+  geom_col() +
+  coord_cartesian(ylim = c(74, 81)) +
+  labs(
+    title = "Average Life Expectancy by Education Level",
+    x = "Education Level",
+    y = "Average Life Expectancy (Years)"
+  ) +
+  theme(legend.position = "none")
+```
+
+**Counties where more adults hold a bachelor's degree or higher have the highest average life expectancy (~78.3 years), while counties with more adults who never finished high school have the lowest (~77.3 years), suggesting that higher education levels are associated with longer life expectancy.**
+
+### Research Question 2
+
+**How does individual education level relate to functional health outcomes among seniors in the Medicare Health Outcomes Survey?**
+```{r}
+bachelors_df <- clean_joined_df |>
+  filter(education_level == "Bachelor+")
+
+ggplot(bachelors_df, aes(x = Value, y = avg.life.expectancy)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "lm") +
+  labs(
+    title = "Bachelor's Degree Rate vs. Life Expectancy by County",
+    x = "% Adults with Bachelor's Degree or Higher",
+    y = "Average Life Expectancy (Years)"
+  )
+```
+
+**The scatterplot shows a positive relationship between the percentage of adults with a bachelor's degree or higher and average life expectancy, suggesting that counties with higher education levels tend to have better functional health outcomes. Although there is some variability among counties, the overall upward trend indicates that higher educational attainment is associated with longer life expectancy among seniors in the Medicare Health Outcomes Survey.**
+
+### Research Question 3
+
+**Do counties with a higher percent of adults who are not high school graduates have lower average life expectancy?**
+```{r}
+q2_df <- joined_df |>
+  filter(Attribute == "Percent of adults who are not high school graduates, 2019-23")
+q2_plot <- ggplot(q2_df) +
+  geom_point(mapping = aes(
+    x = Value,
+    y = avg.life.expectancy,
+    text = paste0("State: ", State.Code, "<br>",
+                  "County Name: ", County, "<br>",
+                  "Percent of adults who are not high school graduates, 2019-23: ", Value, "<br>",
+                  "Life Expectancy: ", avg.life.expectancy)),
+    size = 0.5,
+    alpha = 0.5) +
+  geom_smooth(
+    aes(
+    x = Value,
+    y = avg.life.expectancy),
+    method = "lm", se = FALSE, color = "red") + 
+  labs(
+    title = "Relationship Between Low Educational Attainment and Average Life Expectancy",
+    x = "Percent of adults who are not high school graduates, 2019-23",
+    y = "Life Expectancy"
+  )
+
+ggplotly(q2_plot, tooltip = "text")
+```
+
+**The graph shows that average life expectancy tends to decrease as the percentage of adults who are not high school graduates increases. This suggests a negative relationship between lower educational attainment and life expectancy. The visualization supports the question: counties with a higher percentage of adults who are not high school graduates tend to have lower average life expectancy. Meanwhile, the interactive features, including location information, make it possible to explore potential geographic patterns that may be associated with this relationship.**
+
+# Part 3
+
+### Summary Takeaways
+
+Our project suggests three major findings. First, education level may be associated with life expectancy across U.S. counties. Second, counties with higher educational attainment tend to have longer average life expectancy. Third, counties with a higher percentage of adults who are not high school graduates tend to have lower average life expectancy. Overall, our analysis suggests that educational attainment may be related to life expectancy, which helps answer our research questions.
+
+However, we cannot make a definitive conclusion from this analysis. Based on our scatter plots, the absolute values of the correlation coefficients are approximately 0.4. In addition, there are several potential outliers in the dataset, such as counties with very small populations or unique geographic conditions. These factors may influence the observed relationship. Despite these limitations, the scatter plots still show a trend suggesting that educational attainment may be associated with life expectancy.
+
+In future research, we could examine potential outliers and evaluate whether these outliers significantly affect the results. It may also be useful to group counties by geographic region and visualize them with different colors in the scatter plots. This could help us better understand whether geographic factors influence the relationship between education level and life expectancy.
+
+# Group Information
+
+### Group Information
+
+Our group's project examines how educational attainment is associated with county-level life expectancy among older adults in the United States using linked public health and education datasets.
+
+BD Lab 9:30 Anna Huang
+
+Maha Mustafa (maham7@uw.edu) was interested in exploring how educational attainment influences health outcomes across different communities. She is interested in majoring in Informatics with a specialization in data science, where she can apply analytical skills to real world problems.
+
+Selene Khamneian (selenek@uw.edu) was interested in this project because she wants to better understand how education and social factors influence health outcomes, like life expectancy. She is interested in Informatics and data science because it allows her to understand and explore real world problems and develop skills that are useful for future careers.
+
+Chengyue Zhou (zcy2024@uw.edu) was interested in this topic because I took an education-related course last quarter and would like to explore more deeply how education influences life outcomes. As a Chemical Engineering student, she believed informatics skills are valuable for my research and future career development.
+
+Coding Notes: We used lecture slides, class activities, and worked together in lab section for this project.
